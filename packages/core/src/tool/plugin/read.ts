@@ -4,6 +4,7 @@ import type { Context } from "@opencode/plugin/effect/plugin"
 import { basename, dirname, join } from "path"
 import { ToolFailure } from "@opencode/ai/effect"
 import { Effect, Schema } from "effect"
+import { LinePrefix, notFound, unableTo } from "../voices.js"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Location } from "../../location.js"
 import { FileAccess } from "../../file-access.js"
@@ -12,18 +13,29 @@ import { SessionInstructions } from "../../session/instructions.js"
 import { AbsolutePath } from "../../schema.js"
 import { Skill } from "../../skill.js"
 import { SkillDiscovery } from "../../skill/discovery.js"
-import { ReadToolFileSystem } from "../read-filesystem.js"
+import { MAX_READ_LINES, ReadToolFileSystem, lineEndings } from "../read-filesystem.js"
 import { Environment } from "../../environment/index.js"
+import {
+  description,
+  directoryHeader,
+  fileHeader,
+  limitDescription,
+  missingFolder,
+  offsetDescription,
+  pathDescription,
+  suggestions,
+  truncationMarker,
+} from "./read-voice.js"
 
 export const name = "read"
 const FILENAME = "AGENTS.md"
 const LocationInput = Schema.Struct({
-  path: Schema.String.annotate({ description: "File or directory to read" }),
+  path: Schema.String.annotate({ description: pathDescription }),
   offset: ReadToolFileSystem.PageInput.fields.offset.annotate({
-    description: "The line or directory entry to start reading from (1-based)",
+    description: offsetDescription,
   }),
   limit: ReadToolFileSystem.PageInput.fields.limit.annotate({
-    description: "The maximum number of lines or directory entries to read (defaults to and capped at 2000)",
+    description: limitDescription(MAX_READ_LINES),
   }),
 })
 export const Input = LocationInput
@@ -45,19 +57,18 @@ export const Plugin = {
         editor.add({
           name,
           options: { codemode: false },
-          description:
-            "Read the contents of a file or directory. Supports text files, images, and PDFs. Images and PDFs are presented directly to the model. Each text line is prefixed by its 1-based line number as <line>: <content>. The prefix is for reference and is not part of the file content. Directory entries are returned one per line. Use offset and limit to read large files or directories in sections. Prefer one larger read over many small slices, and use grep to find specific content in large files.",
+          description,
           input: Input,
           output: Output,
           execute: (input, context) => {
             return Effect.gen(function* () {
               if (Skill.isUri(input.path)) {
                 const parsed = parseSkillUri(input.path)
-                if (!parsed) return yield* new ToolFailure({ message: `File not found: ${input.path}` })
+                if (!parsed) return yield* new ToolFailure({ message: notFound("File", input.path) })
                 const id = Skill.ID.make(parsed.id)
                 const skill = yield* skills.get(id)
                 if (!skill || !Skill.isUri(skill.path))
-                  return yield* new ToolFailure({ message: `File not found: ${input.path}` })
+                  return yield* new ToolFailure({ message: notFound("File", input.path) })
                 const extra = yield* skills.files(id)
                 yield* permission.assert({
                   action: "skill",
@@ -85,7 +96,7 @@ export const Plugin = {
                 }).pipe(
                   Effect.catchIf(
                     (error) => error instanceof Environment.NotFound,
-                    () => Effect.fail(new ToolFailure({ message: `File not found: ${input.path}` })),
+                    () => Effect.fail(new ToolFailure({ message: notFound("File", input.path) })),
                   ),
                 )
                 return { output, path: input.path }
@@ -165,7 +176,7 @@ export const Plugin = {
                   error instanceof ReadToolFileSystem.OffsetOutOfRangeError ||
                   error instanceof ReadToolFileSystem.PathKindError
                     ? error.message
-                    : `Unable to read ${input.path}`
+                    : unableTo("read", input.path)
                 return new ToolFailure({ message, error })
               }),
             )
@@ -208,37 +219,35 @@ export const Plugin = {
 
     // A missing folder usually means a removed worktree, a moved directory, or a relative path
     // resolved from the wrong place, so name the first missing folder and its nearest existing parent.
-    const missingFolder = Effect.fn("ReadTool.missingFolder")(function* (input: string, folder: string) {
+    const missingFolderFailure = Effect.fn("ReadTool.missingFolder")(function* (input: string, folder: string) {
       let child = folder
       let parent = dirname(folder)
       while (parent !== child) {
         const found = yield* listing(parent)
         if (found.type === "unknown") break
         if (found.type === "found") {
-          const suggestions = similar(found.names, basename(child)).map((entry) => join(parent, entry))
+          const nearby = similar(found.names, basename(child)).map((entry) => join(parent, entry))
           const message = [
-            `File not found: ${input}`,
-            `The folder ${child} does not exist. The nearest folder that does is ${parent}.`,
-            ...(suggestions.length === 0 ? [] : [`Did you mean one of these?\n${suggestions.join("\n")}`]),
+            notFound("File", input),
+            missingFolder(child, parent),
+            ...(nearby.length === 0 ? [] : [suggestions(nearby)]),
           ].join("\n\n")
           return yield* new ToolFailure({ message })
         }
         child = parent
         parent = dirname(parent)
       }
-      return yield* new ToolFailure({ message: `File not found: ${input}` })
+      return yield* new ToolFailure({ message: notFound("File", input) })
     })
 
     const missing = Effect.fn("ReadTool.missing")(function* (input: string, absolute: string) {
       const folder = dirname(absolute)
       const found = yield* listing(folder)
-      if (found.type === "missing") return yield* missingFolder(input, folder)
-      const suggestions =
+      if (found.type === "missing") return yield* missingFolderFailure(input, folder)
+      const nearby =
         found.type === "found" ? similar(found.names, basename(input)).map((entry) => join(dirname(input), entry)) : []
       const message =
-        suggestions.length === 0
-          ? `File not found: ${input}`
-          : `File not found: ${input}\n\nDid you mean one of these?\n${suggestions.join("\n")}`
+        nearby.length === 0 ? notFound("File", input) : `${notFound("File", input)}\n\n${suggestions(nearby)}`
       return yield* new ToolFailure({ message })
     })
   }),
@@ -269,26 +278,22 @@ export const toModelContent = (path: string, offset: number | undefined, output:
 
   if (output.type === "list-page") {
     const start = offset || 1
-    const content = [
-      output.entries.length === 0
-        ? `Read directory ${path}, 0 entries`
-        : `Read directory ${path}, entries ${start}-${start + output.entries.length - 1}`,
-    ]
+    const content = [directoryHeader(path, start, output.entries.length)]
     output.entries.forEach((entry) => content.push(entry.path))
-    if (output.truncated && output.next !== undefined)
-      content.push(`[Output truncated. Continue reading with offset: ${output.next}]`)
+    if (output.truncated && output.next !== undefined) content.push(truncationMarker(output.next))
     return content.join("\n")
   }
 
   const start = output.type === "text-page" ? output.offset : 1
   // Pages already join selected lines; a trailing newline represents a selected blank line.
   const text = output.type === "file" ? output.content.replace(/\n$/, "") : output.content
-  const lines = output.content === "" ? [] : text.split("\n")
-  const content = [
-    lines.length === 0 ? `Read file ${path}, 0 lines` : `Read file ${path}, lines ${start}-${start + lines.length - 1}`,
-  ]
-  lines.forEach((line, index) => content.push(`${start + index}: ${line}`))
+  const rawLines = output.content === "" ? [] : text.split("\n")
+  // Line endings are not line content: rendered lines drop the separator byte (the paged strip rule).
+  const lines = rawLines.map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line))
+  const endings = output.type === "text-page" ? output.endings : lineEndings(rawLines, !output.content.endsWith("\n"))
+  const content = [fileHeader(path, start, lines.length, endings)]
+  lines.forEach((line, index) => content.push(`${LinePrefix.render(start + index)}${line}`))
   if (output.type === "text-page" && output.truncated && output.next !== undefined)
-    content.push(`[Output truncated. Continue reading with offset: ${output.next}]`)
+    content.push(truncationMarker(output.next))
   return content.join("\n")
 }

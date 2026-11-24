@@ -10,6 +10,12 @@ import type { Files } from "../environment/index.js"
 import { FileSystem } from "../filesystem.js"
 import { Mime } from "../mime.js"
 import { AbsolutePath, NonNegativeInt, PositiveInt, RelativePath } from "../schema.js"
+import {
+  binaryFileMessage,
+  mediaIngestLimitMessage,
+  offsetOutOfRangeMessage,
+  pathKindMessage,
+} from "./plugin/read-voice.js"
 
 export const MAX_READ_LINES = 2_000
 export const MAX_READ_BYTES = 50 * 1024
@@ -19,12 +25,13 @@ const MAX_LINE_LENGTH = 2_000
 const TREE_BASE = 6
 const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
 export const MEDIA_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"])
+export type LineEndings = "lf" | "crlf" | "mixed"
 
 export class BinaryFileError extends Schema.TaggedError<BinaryFileError>()("ReadTool.BinaryFileError", {
   resource: Schema.String,
 }) {
   override get message() {
-    return `Cannot read binary file: ${this.resource}`
+    return binaryFileMessage(this.resource)
   }
 }
 
@@ -36,7 +43,7 @@ export class MediaIngestLimitError extends Schema.TaggedError<MediaIngestLimitEr
   },
 ) {
   override get message() {
-    return `Media exceeds ${this.maximumBytes} byte ingestion limit: ${this.resource}`
+    return mediaIngestLimitMessage(this.resource, this.maximumBytes)
   }
 }
 
@@ -45,7 +52,7 @@ export class OffsetOutOfRangeError extends Schema.TaggedError<OffsetOutOfRangeEr
   { offset: Schema.Number, lines: Schema.Number },
 ) {
   override get message() {
-    return `Offset ${this.offset} is out of range for this file (${this.lines} ${this.lines === 1 ? "line" : "lines"})`
+    return offsetOutOfRangeMessage(this.offset, this.lines)
   }
 }
 
@@ -54,7 +61,7 @@ export class PathKindError extends Schema.TaggedError<PathKindError>()("ReadTool
   expected: Schema.Literals(["a file", "a file or directory"]),
 }) {
   override get message() {
-    return `Path is not ${this.expected}: ${this.resource}`
+    return pathKindMessage(this.resource, this.expected)
   }
 }
 
@@ -85,6 +92,7 @@ export class TextPage extends Schema.Class<TextPage>("ReadTool.TextPage")({
   offset: PositiveInt,
   truncated: Schema.Boolean,
   next: Schema.optionalKey(PositiveInt),
+  endings: Schema.optionalKey(Schema.Literals(["lf", "crlf", "mixed"])),
 }) {}
 
 export interface ListEntry extends Schema.Schema.Type<typeof ListEntry> {}
@@ -253,6 +261,7 @@ const makeTextPage = Effect.fnUntraced(function* (
     offset: result.offset,
     truncated: result.next !== undefined,
     ...(result.next === undefined ? {} : { next: result.next }),
+    ...(result.endings === undefined ? {} : { endings: result.endings }),
   })
 })
 
@@ -321,7 +330,24 @@ const textPage = (bytes: Uint8Array, eof: boolean, page: PageInput) => {
 
   const consumedLines = next === undefined ? available.length : next - 1
   const consumed = consumedLines === 0 ? 0 : (nthNewline(bytes, consumedLines) ?? bytes.length)
-  return { entries, offset, next, consumed }
+  const lastUnterminated = eof && split.at(-1) !== ""
+  const endings = lineEndings(complete.slice(offset - 1, offset - 1 + entries.length), lastUnterminated)
+  return { entries, offset, next, consumed, endings }
+}
+
+// Counts separator bytes over raw pre-strip lines. An unterminated final line
+// has no separator; a bare trailing \r without a \n is content, not a separator.
+export const lineEndings = (lines: readonly string[], lastUnterminated: boolean): LineEndings | undefined => {
+  let lf = 0
+  let crlf = 0
+  for (const [index, line] of lines.entries()) {
+    if (lastUnterminated && index === lines.length - 1) continue
+    if (line.endsWith("\r")) crlf++
+    else lf++
+  }
+  if (lf > 0 && crlf > 0) return "mixed"
+  if (crlf > 0) return "crlf"
+  if (lf > 0) return "lf"
 }
 
 const clampLine = (line: string) =>

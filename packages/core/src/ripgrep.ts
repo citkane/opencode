@@ -240,17 +240,22 @@ const layer = Layer.effect(
                 if (!json || typeof json !== "object" || !("type" in json) || json.type !== "match")
                   return Effect.undefined
                 return Schema.decodeUnknownEffect(RawMatch)(json).pipe(
-                  Effect.map((match) => ({
-                    ...match.data,
-                    lines: {
-                      text:
-                        match.data.lines.text.length > MAX_LINE_CHARS
-                          ? Buffer.from(match.data.lines.text.slice(0, MAX_LINE_CHARS), "utf8").toString() + "..."
-                          : match.data.lines.text,
-                    },
-                    path: { text: normalizePath(match.data.path.text) },
-                    submatches: match.data.submatches.slice(0, MAX_SUBMATCHES),
-                  })),
+                  Effect.map((match) => {
+                    // The bound limits the line's content, not the line-with-terminator: strip the terminator
+                    // before the cut so "..." never splits a CRLF pair; an untruncated row keeps its raw bytes.
+                    const content = match.data.lines.text.replace(/(\r\n|\n|\r)$/, "")
+                    return {
+                      ...match.data,
+                      lines: {
+                        text:
+                          content.length > MAX_LINE_CHARS
+                            ? Buffer.from(content.slice(0, MAX_LINE_CHARS), "utf8").toString() + "..."
+                            : match.data.lines.text,
+                      },
+                      path: { text: normalizePath(match.data.path.text) },
+                      submatches: match.data.submatches.slice(0, MAX_SUBMATCHES),
+                    }
+                  }),
                   Effect.mapError((cause) => failure("Invalid ripgrep match output", cause)),
                 )
               }),

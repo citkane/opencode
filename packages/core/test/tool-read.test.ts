@@ -16,6 +16,8 @@ import { Global } from "@opencode/util/global"
 import { FileAccess } from "@opencode/core/file-access"
 import { location } from "./fixture/location"
 import { Tool } from "@opencode/core/tool"
+import { LinePrefix } from "@opencode/core/tool/voices"
+import { description } from "@opencode/core/tool/plugin/read-voice"
 import { ReadTool } from "@opencode/core/tool/plugin/read"
 import { ReadToolFileSystem } from "@opencode/core/tool/read-filesystem"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
@@ -173,7 +175,7 @@ describe("ReadTool", () => {
         encoding: "utf8",
         mime: "text/plain",
       })
-      expect(execution.content).toEqual([{ type: "text", text: "Read file README.md, lines 1-1\n1: hello" }])
+      expect(execution.content).toEqual([{ type: "text", text: `Read file README.md, lines 1-1\n${LinePrefix.render(1)}hello` }])
       expect(assertions).toMatchObject([{ sessionID, action: "read", resources: ["README.md"], save: ["*"] }])
       expect(readCalls).toEqual([
         {
@@ -182,6 +184,14 @@ describe("ReadTool", () => {
         },
       ])
       expect(listCalls).toEqual([])
+    }),
+  )
+
+  it.effect("pins the registered description to the composed voice", () =>
+    Effect.gen(function* () {
+      const registry = yield* Tool.Service
+      const [definition] = yield* toolDefinitions(registry)
+      expect(definition?.description).toBe(description)
     }),
   )
 
@@ -815,7 +825,7 @@ describe("ReadTool", () => {
 
       expect(result).toMatchObject({
         status: "completed",
-        content: [{ type: "text", text: `Read file ${recovered}, lines 1-1\n1: hello` }],
+        content: [{ type: "text", text: `Read file ${recovered}, lines 1-1\n${LinePrefix.render(1)}hello` }],
       })
       expect(assertions).toMatchObject([
         { action: "read", resources: [requested] },
@@ -1050,12 +1060,58 @@ describe("ReadTool", () => {
       expect(result.content).toEqual([
         {
           type: "text",
-          text: "Read file large.txt, lines 2-2\n2: hello\n[Output truncated. Continue reading with offset: 3]",
+          text: `Read file large.txt, lines 2-2\n${LinePrefix.render(2)}hello\n[Output truncated. Continue reading with offset: 3]`,
         },
       ])
       expect(readCalls).toEqual([
         { input: AbsolutePath.make(path.join(process.cwd(), "large.txt")), page: { offset: 2, limit: 1 } },
       ])
+    }),
+  )
+
+  it.effect("renders CRLF file lines identically whole-file and paged, with the header stating the endings", () =>
+    Effect.gen(function* () {
+      readOverride = (input, resource, page = {}) =>
+        page.offset !== undefined || page.limit !== undefined
+          ? Effect.succeed(
+              new ReadToolFileSystem.TextPage({
+                type: "text-page",
+                content: "alpha\nbeta",
+                mime: "text/plain",
+                offset: 1,
+                truncated: false,
+                endings: "crlf",
+              }),
+            )
+          : Effect.succeed({
+              type: "file",
+              uri: "file:///crlf.txt",
+              name: "crlf.txt",
+              content: "alpha\r\nbeta\r\n",
+              encoding: "utf8",
+              mime: "text/plain",
+            })
+      const registry = yield* Tool.Service
+
+      const whole = yield* executeTool(registry, {
+        sessionID,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "call-crlf-whole", name: "read", input: { path: "crlf.txt" } },
+      })
+      const paged = yield* executeTool(registry, {
+        sessionID,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "call-crlf-page", name: "read", input: { path: "crlf.txt", offset: 1, limit: 2 } },
+      })
+      const expected = `Read file crlf.txt, lines 1-2 (CRLF line endings)\n${LinePrefix.render(1)}alpha\n${LinePrefix.render(2)}beta`
+      expect(whole).toMatchObject({
+        status: "completed",
+        content: [{ type: "text", text: expected }],
+      })
+      expect(paged).toMatchObject({
+        status: "completed",
+        content: [{ type: "text", text: expected }],
+      })
     }),
   )
 
@@ -1102,7 +1158,7 @@ describe("ReadTool", () => {
           })
           expect(file).toMatchObject({
             status: "completed",
-            content: [{ type: "text", text: "Read file skill://guide/references/style.md, lines 2-2\n2: Line 2" }],
+            content: [{ type: "text", text: `Read file skill://guide/references/style.md, lines 2-2\n${LinePrefix.render(2)}Line 2` }],
           })
 
           const root = yield* executeTool(registry, {

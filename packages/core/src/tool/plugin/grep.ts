@@ -4,6 +4,7 @@ import type { Context } from "@opencode/plugin/effect/plugin"
 import { ToolFailure } from "@opencode/ai/effect"
 import { Effect, Schema } from "effect"
 import path from "path"
+import { GrepLine, unableTo } from "../voices.js"
 import { Environment } from "../../environment/index.js"
 import { FileSystem } from "../../filesystem.js"
 import { Location } from "../../location.js"
@@ -12,6 +13,13 @@ import { Permission } from "../../permission.js"
 import { Ripgrep } from "../../ripgrep.js"
 import { RelativePath } from "../../schema.js"
 import { ToolSearch } from "../search.js"
+import {
+  description,
+  foundMatches,
+  noMatches,
+  pathHeader,
+  truncationNote,
+} from "./grep-voice.js"
 
 export const name = "grep"
 
@@ -43,21 +51,19 @@ type EncodedOutput = typeof Output.Encoded
 
 /** Format raw search matches into concise model content. */
 export const toModelContent = (matches: EncodedOutput, truncated = false) => {
-  const lines = matches.length === 0 ? ["No matches found"] : [`Found ${matches.length} matches`]
+  const lines = matches.length === 0 ? [noMatches] : [foundMatches(matches.length)]
   let current = ""
   for (const match of matches) {
     if (current !== match.entry.path) {
       if (current) lines.push("")
       current = match.entry.path
-      lines.push(`${match.entry.path}:`)
+      lines.push(pathHeader(match.entry.path))
     }
-    lines.push(`  Line ${match.line}: ${match.text}`)
+    // The preview presents the line's content, terminator-free — the LF view Read shows the model:
+    // ripgrep splits on CRLF, LF, and CR, so strip the row's trailing terminator before the join.
+    lines.push(GrepLine.render(match.line) + match.text.replace(/(\r\n|\n|\r)$/, ""))
   }
-  if (truncated)
-    lines.push(
-      "",
-      `(Results are truncated: showing first ${matches.length} results. Consider using a more specific path or pattern.)`,
-    )
+  if (truncated) lines.push("", truncationNote(matches.length))
   return lines.join("\n")
 }
 
@@ -76,8 +82,7 @@ export const Plugin = {
         editor.add({
           name,
           options: { codemode: false },
-          description:
-            "Search file contents using ripgrep's regular expression syntax or literal text matching. Use it to locate specific code, symbols, or text patterns, and narrow searches with `path` or `include`. Returns matching file paths, line numbers, and line previews.",
+          description,
           input: Input,
           output: Output,
           execute: (input, context) =>
@@ -141,7 +146,7 @@ export const Plugin = {
                   ? error
                   : error instanceof Ripgrep.InvalidPatternError
                     ? new ToolFailure({ message: `Invalid regex pattern: ${error.message}` })
-                    : new ToolFailure({ message: `Unable to grep for ${input.pattern}`, error }),
+                    : new ToolFailure({ message: unableTo("grep for", input.pattern), error }),
               ),
             ),
         }),

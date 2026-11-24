@@ -59,3 +59,48 @@ Tool filtering is catalog visibility, not execution authorization. A call still 
 Built-ins return complete tool responses. `Tool.Snapshot.execute` is the local execution boundary. Generic output bounding is applied by the Session runner after execution.
 
 Producer capture remains local to producers. Shell stores combined process output in its backing file and returns a bounded tail with the full-output path when truncated.
+
+## Voice
+
+- A contract is the source-code, byte-determined surface that a unit exposes (including inline definitions). This is the superset.
+- Voices are a subset of contract. A voice is the serialised input–output string contract with the model.
+
+Everything a tool says to the model is defined in a voice file, never inline. DRY: each string is defined once.
+
+Two kinds:
+
+- **Serialization voices** — a rendered format plus its documented reading rule, and the fixed message formats for standard events (an event any tool can emit with the same meaning) — are cross-tool: defined in `tool/voices.ts`.
+- **Tool voice** — everything else the tool says — is defined in `tool/plugin/<tool>-voice.ts`, beside the tool's own file.
+
+The obligation is scoped to the change: a tool whose model-facing text is not being changed keeps its current placement.
+
+Migration (when a tool's model-facing text is next changed):
+
+- Inline model-facing text in a tool file moves to the voice file of its kind.
+- The migrator **audits** for new shared formats: a standard event instantiated by at least one other tool is appended to `tool/voices.ts` as a fixed message format with tool-specific slots, and its instantiators are re-pointed to it; an event only this tool instantiates stays in the per-tool file until the threshold is met.
+
+**Examples:**
+
+- `edit-voice.ts`, `read-voice.ts`
+
+## Functional (composition) tests
+
+**The domain commitment.** Every cross-tool contract this domain participates in is covered by a functional test.
+
+**Scope — what a functional test covers:**
+
+- A functional test is a composition of units that share functional boundaries; each composition (a pipeline) SHOULD be covered by a functional test.
+- Every possible composition of units SHOULD have its own unique functional test, disambiguated by the `<input-unit>-<output-unit>` name pair.
+- A scope is set by the outer boundaries: `boo → foo → bar → la` subsumes the inner `foo → bar` (covered by `functional-boo-la.test.ts`), but a composition used in a different order — `bar → foo` — requires its own unique test (`functional-bar-foo.test.ts`).
+- The bytes of the source implementations are the truth that both the spec's `[input, expected output][]` definition and the test's consumption SHOULD match — a functional test MUST NOT leave a real compositional scenario invisible and untested.
+
+**Domain facts:**
+
+- Placement: the functional tests and the functional spec are co-located in the domain test directory, `packages/core/test/`; the shared `composition.ts` harness sits in its `fixture/` subdirectory.
+- Naming: a functional test is `functional-<input-unit>-<output-unit>.test.ts`; the functional spec is `functional-spec.ts`; the shared harness is `composition.ts`.
+- Invocation: `bun run script/test.ts test/functional-*.test.ts` from `packages/core` — the package's sandboxed `bun test` wrapper.
+- Where a LLM is a unit in the pipeline: the test is driven where the units are composed — the session runner: the tool plugins and real I/O against a temp `Location`, through `TestLLM.testLayer()` (`test/fixture/composition.ts`); the executable inverse of a model-facing rendering lives with the producer's voice (e.g. `rendered line → file bytes` via `decode` and `LinePrefix`/`GrepLine.decodeRule` in `voices.ts`).
+
+**Examples:**
+
+- `functional-read-edit.test.ts`, `functional-grep-edit.test.ts`

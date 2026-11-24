@@ -14,7 +14,9 @@ import { Permission } from "@opencode/core/permission"
 import { AbsolutePath } from "@opencode/core/schema"
 import { Session } from "@opencode/core/session"
 import { Tool } from "@opencode/core/tool"
+import { LinePrefix } from "@opencode/core/tool/voices"
 import { EditTool } from "@opencode/core/tool/plugin/edit"
+import { ambiguity, closestLines, description, noMatch } from "@opencode/core/tool/plugin/edit-voice"
 import { transformEnvironmentFiles } from "./fixture/environment"
 import { location } from "./fixture/location"
 import { tmpdir, withTempDir } from "./fixture/tmpdir"
@@ -178,6 +180,18 @@ describe("EditTool", () => {
             }),
           ),
         ),
+      )
+    }),
+  )
+
+  it.live("pins the registered description to the composed voice", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      return withTool(tmp.path, edit, (registry) =>
+        Effect.gen(function* () {
+          const [definition] = yield* toolDefinitions(registry)
+          expect(definition?.description).toBe(description)
+        }),
       )
     }),
   )
@@ -404,8 +418,7 @@ describe("EditTool", () => {
                 status: "error",
                 error: {
                   type: "tool.execution",
-                  message:
-                    "Could not find oldString in matches.txt. It must match exactly, including whitespace and indentation.",
+                  message: noMatch("matches.txt"),
                 },
               })
               expect(
@@ -414,8 +427,7 @@ describe("EditTool", () => {
                 status: "error",
                 error: {
                   type: "tool.execution",
-                  message:
-                    "Found 2 matches for oldString, but expected exactly one. Add more surrounding context to make oldString unique, or set replaceAll to true to replace every occurrence.",
+                  message: ambiguity(2),
                 },
               })
               expect(edit.writes).toEqual([])
@@ -432,7 +444,7 @@ describe("EditTool", () => {
       const target = path.join(tmp.path, "miss.ts")
       const miss = (oldString: string, newString: string) =>
         withTool(tmp.path, edit, (registry) => executeTool(registry, call({ path: "miss.ts", oldString, newString })))
-      const missed = "Could not find oldString in miss.ts. It must match exactly, including whitespace and indentation."
+      const missed = noMatch("miss.ts")
       return Effect.promise(() =>
         fs.writeFile(
           target,
@@ -445,7 +457,7 @@ describe("EditTool", () => {
               status: "error",
               error: {
                 type: "tool.execution",
-                message: `${missed}\n\nThe closest lines in the file:\n3: export function run() {\n4:   const value = a()\n5:   return value + 1\n6: }`,
+                message: `${missed}\n\nThe closest lines in the file:\n${LinePrefix.render(3)}export function run() {\n${LinePrefix.render(4)}  const value = a()\n${LinePrefix.render(5)}  return value + 1\n${LinePrefix.render(6)}}`,
               },
             })
             expect(yield* miss("  return value + 2", "  return value + 1")).toEqual({
@@ -467,7 +479,7 @@ describe("EditTool", () => {
               status: "error",
               error: {
                 type: "tool.execution",
-                message: `${missed}\n\nThe closest lines in the file:\n1: import { a } from './a'`,
+                message: `${missed}\n\nThe closest lines in the file:\n${LinePrefix.render(1)}import { a } from './a'`,
               },
             })
             edit.readAllowed = false
@@ -581,7 +593,9 @@ describe("EditTool", () => {
         ),
         Effect.tap((result) => Effect.sync(() => expect(result.status).toBe("completed"))),
         Effect.andThen(Effect.promise(() => fs.readFile(target, "utf8"))),
-        Effect.tap((content) => Effect.sync(() => expect(content).toBe("before  \nchanged\nafter  \n"))),
+        // Old tier dropped the region's trailing whitespace (previously "before  \nchanged\nafter  \n"); changed
+        // inherits the spaces of the line it replaces, and the final line's tab stands after the region.
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("before  \nchanged  \t\nafter  \n"))),
       )
     }),
   )
@@ -609,10 +623,409 @@ describe("EditTool", () => {
         Effect.andThen(Effect.promise(() => Promise.all([fs.readFile(overlap, "utf8"), fs.readFile(windows, "utf8")]))),
         Effect.tap(([overlapContent, windowsContent]) =>
           Effect.sync(() => {
-            expect(overlapContent).toBe("x\na  \n")
-            expect(windowsContent).toBe("x\r\n")
+            // Old tier dropped the matched lines' trailing whitespace (previously "x\na  \n" / "x\r\n"); the
+            // content span keeps it — x inherits the first line's two spaces, and the final line's trailing stands.
+            expect(overlapContent).toBe("x    \na  \n")
+            expect(windowsContent).toBe("x  \t\r\n")
           }),
         ),
+      )
+    }),
+  )
+
+  it.live("replaces the exact region, leaving the whitespace-variant cousin untouched", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "cousin.txt")
+      return Effect.promise(() => fs.writeFile(target, "  hello world\nhello world\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            Effect.gen(function* () {
+              const replaced = yield* executeTool(
+                registry,
+                call({ path: "cousin.txt", oldString: "  hello world", newString: "  hello there" }),
+              )
+              expect(replaced).toMatchObject({ status: "completed" })
+            }),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("  hello there\nhello world\n"))),
+      )
+    }),
+  )
+
+  it.live("reports ambiguity when oldString's whitespace matches neither variant in the file", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "ambiguous.txt")
+      return Effect.promise(() => fs.writeFile(target, "  same line\n    same line\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            Effect.gen(function* () {
+              expect(
+                yield* executeTool(
+                  registry,
+                  call({ path: "ambiguous.txt", oldString: "     same line", newString: "x" }),
+                ),
+              ).toEqual({
+                status: "error",
+                error: {
+                  type: "tool.execution",
+                  message: ambiguity(2),
+                },
+              })
+              expect(edit.writes).toEqual([])
+            }),
+          ),
+        ),
+      )
+    }),
+  )
+
+  it.live("points a content miss at the closest lines with the match contract", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "missed.ts")
+      const missed = noMatch("missed.ts")
+      return Effect.promise(() => fs.writeFile(target, "const x = 1\nconst y = 2\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            Effect.gen(function* () {
+              expect(
+                yield* executeTool(
+                  registry,
+                  call({ path: "missed.ts", oldString: "const x = 1\nconst y = 3", newString: "const x = 1\nconst y = 4" }),
+                ),
+              ).toEqual({
+                status: "error",
+                error: {
+                  type: "tool.execution",
+                  message: `${missed}\n\nThe closest lines in the file:\n${LinePrefix.render(1)}const x = 1`,
+                },
+              })
+              expect(edit.writes).toEqual([])
+            }),
+          ),
+        ),
+      )
+    }),
+  )
+
+  it.live("fails fast on a whitespace-only oldString instead of spinning on an empty needle", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "blank.txt")
+      return Effect.promise(() => fs.writeFile(target, "abc\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            Effect.gen(function* () {
+              expect(
+                yield* executeTool(registry, call({ path: "blank.txt", oldString: "   ", newString: "x" })),
+              ).toEqual({
+                status: "error",
+                error: {
+                  type: "tool.execution",
+                  message: noMatch("blank.txt"),
+                },
+              })
+              expect(edit.writes).toEqual([])
+            }),
+          ),
+        ),
+      )
+    }),
+  )
+
+  it.live("treats blank-line count as structure and never matches across an extra blank line", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "blanklines.txt")
+      return Effect.promise(() => fs.writeFile(target, "a\n\n\nb\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            Effect.gen(function* () {
+              expect(
+                yield* executeTool(registry, call({ path: "blanklines.txt", oldString: "a\n\nb", newString: "X" })),
+              ).toEqual({
+                status: "error",
+                error: {
+                  type: "tool.execution",
+                  message: noMatch("blanklines.txt", `${closestLines}\n${LinePrefix.render(1)}a`),
+                },
+              })
+              expect(edit.writes).toEqual([])
+            }),
+          ),
+        ),
+      )
+    }),
+  )
+
+  it.live("matches the exact bytes Read renders after the prefix strip", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "stripped.txt")
+      return Effect.promise(() => fs.writeFile(target, "  alpha\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            executeTool(registry, call({ path: "stripped.txt", oldString: "  alpha", newString: "  beta" })),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("  beta\n"))),
+      )
+    }),
+  )
+
+  it.live("keeps pipes in the content intact", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "pipe.txt")
+      return Effect.promise(() => fs.writeFile(target, "a | b\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            executeTool(registry, call({ path: "pipe.txt", oldString: "a | b", newString: "c | d" })),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("c | d\n"))),
+      )
+    }),
+  )
+
+  it.live("keeps the file's deeper indentation over the model's shallower indent", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "indent.txt")
+      return Effect.promise(() => fs.writeFile(target, "    alpha\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            executeTool(registry, call({ path: "indent.txt", oldString: "  alpha", newString: "  beta" })),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("    beta\n"))),
+      )
+    }),
+  )
+
+  it.live("keeps the file's tab or space indentation form over the model's other form", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const tabs = path.join(tmp.path, "tabs.txt")
+      const spaces = path.join(tmp.path, "spaces.txt")
+      return Effect.promise(() =>
+        Promise.all([fs.writeFile(tabs, "\talpha\n"), fs.writeFile(spaces, "    alpha\n")]),
+      ).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            Effect.gen(function* () {
+              const tabbed = yield* executeTool(
+                registry,
+                call({ path: "tabs.txt", oldString: "    alpha", newString: "    beta" }),
+              )
+              expect(tabbed.status).toBe("completed")
+              const spaced = yield* executeTool(
+                registry,
+                call({ path: "spaces.txt", oldString: "\talpha", newString: "\tbeta" }),
+              )
+              expect(spaced.status).toBe("completed")
+            }),
+          ),
+        ),
+        Effect.andThen(
+          () =>
+            Effect.promise(() =>
+              Promise.all([fs.readFile(tabs, "utf8"), fs.readFile(spaces, "utf8")]),
+            ),
+        ),
+        Effect.tap(([tabContent, spaceContent]) =>
+          Effect.sync(() => {
+            expect(tabContent).toBe("\tbeta\n")
+            expect(spaceContent).toBe("    beta\n")
+          }),
+        ),
+      )
+    }),
+  )
+
+  it.live("lets the model's internal whitespace run replace the file's", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "run.txt")
+      return Effect.promise(() => fs.writeFile(target, "a  b\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            executeTool(registry, call({ path: "run.txt", oldString: "a b", newString: "A B" })),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("A B\n"))),
+      )
+    }),
+  )
+
+  it.live("keeps the file's deep indentation when the model's content carries a shallower indent", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "deep.txt")
+      return Effect.promise(() => fs.writeFile(target, "        alpha\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            executeTool(registry, call({ path: "deep.txt", oldString: "  alpha", newString: "  beta" })),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("        beta\n"))),
+      )
+    }),
+  )
+
+  it.live("tolerates a trailing-whitespace difference on either side", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const fileTrailing = path.join(tmp.path, "file-trailing.txt")
+      const modelTrailing = path.join(tmp.path, "model-trailing.txt")
+      return Effect.promise(() =>
+        Promise.all([
+          fs.writeFile(fileTrailing, "line  \n"),
+          fs.writeFile(modelTrailing, "line\n"),
+        ]),
+      ).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            Effect.gen(function* () {
+              const fileSide = yield* executeTool(
+                registry,
+                call({ path: "file-trailing.txt", oldString: "line", newString: "LINE" }),
+              )
+              expect(fileSide.status).toBe("completed")
+              const modelSide = yield* executeTool(
+                registry,
+                call({ path: "model-trailing.txt", oldString: "line ", newString: "LINE" }),
+              )
+              expect(modelSide.status).toBe("completed")
+            }),
+          ),
+        ),
+        Effect.andThen(
+          () =>
+            Effect.promise(() =>
+              Promise.all([fs.readFile(fileTrailing, "utf8"), fs.readFile(modelTrailing, "utf8")]),
+            ),
+        ),
+        Effect.tap(([fileSide, modelSide]) =>
+          Effect.sync(() => {
+            expect(fileSide).toBe("LINE  \n")
+            expect(modelSide).toBe("LINE\n")
+          }),
+        ),
+      )
+    }),
+  )
+
+  it.live("keeps each file line's indentation in a multi-line tolerant match", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "perline.txt")
+      return Effect.promise(() => fs.writeFile(target, "  alpha\n    beta\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            executeTool(
+              registry,
+              call({ path: "perline.txt", oldString: "alpha\nbeta", newString: "ALPHA\nBETA" }),
+            ),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("  ALPHA\n    BETA\n"))),
+      )
+    }),
+  )
+
+  it.live("replaces every whitespace-variant twin, keeping each line's own file whitespace", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "twins.txt")
+      return Effect.promise(() => fs.writeFile(target, "  same\nsame\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            Effect.gen(function* () {
+              const replaced = yield* executeTool(
+                registry,
+                call({ path: "twins.txt", oldString: "  same", newString: "  SAMEDIFF", replaceAll: true }),
+              )
+              expect(replaced).toMatchObject({ status: "completed", output: { replacements: 2 } })
+            }),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("  SAMEDIFF\nSAMEDIFF\n"))),
+      )
+    }),
+  )
+
+  it.live("applies the model's re-indented bytes verbatim on an exact match", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "reindent.txt")
+      return Effect.promise(() => fs.writeFile(target, "  alpha\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            executeTool(registry, call({ path: "reindent.txt", oldString: "  alpha", newString: "    beta" })),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("    beta\n"))),
+      )
+    }),
+  )
+
+  it.live("keeps the bytes around a mid-line tolerant match untouched", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "midline.txt")
+      return Effect.promise(() => fs.writeFile(target, "x a  b y\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            executeTool(registry, call({ path: "midline.txt", oldString: "a b", newString: "A B" })),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("x A B y\n"))),
+      )
+    }),
+  )
+
+  it.live("keeps the file's trailing whitespace when the model's differs", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "trailing-both.txt")
+      return Effect.promise(() => fs.writeFile(target, "foo\t\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            executeTool(registry, call({ path: "trailing-both.txt", oldString: "foo ", newString: "bar " })),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("bar\t\n"))),
+      )
+    }),
+  )
+
+  it.live("keeps a mapped line's trailing whitespace in a multi-line tolerant match", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const target = path.join(tmp.path, "trailing-mapped.txt")
+      return Effect.promise(() => fs.writeFile(target, "a  \nb\n")).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            executeTool(registry, call({ path: "trailing-mapped.txt", oldString: "a \nb", newString: "A \nb" })),
+          ),
+        ),
+        Effect.andThen(() => Effect.promise(() => fs.readFile(target, "utf8"))),
+        Effect.tap((content) => Effect.sync(() => expect(content).toBe("A  \nb\n"))),
       )
     }),
   )
@@ -784,7 +1197,7 @@ describe("EditTool", () => {
                 error: {
                   type: "tool.execution",
                   message:
-                    "No changes to apply: the edit leaves quote.txt unchanged. Line endings follow the file; to change them, write \\r explicitly in oldString or newString.",
+                    "No changes to apply: the edit leaves quote.txt unchanged.",
                 },
               })
               expect(edit.writes).toEqual([])

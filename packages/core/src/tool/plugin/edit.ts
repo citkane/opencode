@@ -10,6 +10,7 @@ import type { Context } from "@opencode/plugin/effect/plugin"
 import { ToolFailure } from "@opencode/ai/effect"
 import { FileDiff } from "@opencode/schema/file-diff"
 import { Effect, Schema } from "effect"
+import { LinePrefix, notFound, unableTo } from "../voices.js"
 import { toolFailure } from "../runtime.js"
 import { Environment } from "../../environment/index.js"
 import { FileMutation } from "../../file-mutation.js"
@@ -17,20 +18,31 @@ import { Location } from "../../location.js"
 import { FileAccess } from "../../file-access.js"
 import { FileWrite } from "../../file-write.js"
 import { Permission } from "../../permission.js"
+import {
+  alreadyApplied,
+  ambiguity,
+  closestLines,
+  description,
+  directoryNotFile,
+  edited,
+  emptyOldString,
+  identicalNoOp,
+  newStringDescription,
+  noMatch,
+  noOp,
+  oldStringDescription,
+  pathDescription,
+  replaceAllDescription,
+} from "./edit-voice.js"
 import { fileDiff } from "./file-diff.js"
 
 export const name = "edit"
 
 export const Input = Schema.Struct({
-  path: Schema.String.annotate({
-    description: "File to edit",
-  }),
-  oldString: Schema.String.annotate({ description: "Exact text to find and replace" }),
-  newString: Schema.String.annotate({ description: "Text to replace oldString with (must differ from oldString)" }),
-  replaceAll: Schema.optionalKey(Schema.Boolean).annotate({
-    description:
-      "Whether to replace every occurrence of oldString. When false, oldString must match exactly once. Defaults to false.",
-  }),
+  path: Schema.String.annotate({ description: pathDescription }),
+  oldString: Schema.String.annotate({ description: oldStringDescription }),
+  newString: Schema.String.annotate({ description: newStringDescription }),
+  replaceAll: Schema.optionalKey(Schema.Boolean).annotate({ description: replaceAllDescription }),
 })
 
 export const Output = Schema.Struct({
@@ -63,42 +75,53 @@ const findOccurrences = (content: string, search: string) => {
   return result
 }
 
-const findLineOccurrences = (content: string, search: string) => {
-  const trailingNewline = search.endsWith("\n")
-  const expected = search.split("\n")
-  if (trailingNewline) expected.pop()
-  const lines = [...content.matchAll(/[^\n]*(?:\n|$)/g)]
-    .filter((match) => match[0] !== "")
-    .map((match) => {
-      const newline = match[0].endsWith("\n")
-      const text = newline ? match[0].slice(0, -1) : match[0]
-      return {
-        start: match.index,
-        end: match.index + match[0].length,
-        text,
-        contentEnd: match.index + text.length - (text.endsWith("\r") ? 1 : 0),
-        newline,
+const canonLine = (line: string) => normalizeForMatch(line).replace(/[ \t]+/g, " ").trim()
+
+/** One line's canonical form and, for each canonical character, its offset in the line. */
+const canonize = (line: string) => {
+  const normalized = normalizeForMatch(line)
+  let text = ""
+  const spans: number[] = []
+  let index = 0
+  while (index < normalized.length) {
+    const char = normalized[index]
+    if (char === " " || char === "\t") {
+      const run = index
+      while (index < normalized.length && (normalized[index] === " " || normalized[index] === "\t")) index++
+      if (text !== "") {
+        text += " "
+        spans.push(run)
       }
-    })
-  const candidates = lines.flatMap((line, index) => {
-    const actual = lines.slice(index, index + expected.length)
-    if (actual.length !== expected.length) return []
-    if (
-      !actual.every(
-        (item, lineIndex) =>
-          normalizeForMatch(item.text.trimEnd()) === normalizeForMatch(expected[lineIndex].trimEnd()),
-      )
-    )
-      return []
-    const last = actual.at(-1)!
-    if (trailingNewline && !last.newline) return []
-    return [{ start: line.start, end: trailingNewline ? last.end : last.contentEnd }]
-  })
-  return candidates.reduce<Match[]>((result, candidate) => {
-    if (result.some((match) => match.end > candidate.start && match.start < candidate.end)) return result
-    result.push(candidate)
-    return result
-  }, [])
+    } else {
+      text += char
+      spans.push(index++)
+    }
+  }
+  // Trailing whitespace is not canonical (canonLine trims both ends).
+  while (text.endsWith(" ")) {
+    text = text.slice(0, -1)
+    spans.pop()
+  }
+  return { text, spans }
+}
+
+/** Canonical form of the LF view. Newlines are canonical characters (structure); spans holds the LF-view
+ * offset of every canonical character, so a canonical match maps back through spans[start] … spans[end-1] + 1. */
+const canon = (view: string) => {
+  let text = ""
+  const spans: number[] = []
+  let offset = 0
+  for (const line of view.split("\n")) {
+    const { text: lineText, spans: lineSpans } = canonize(line)
+    if (text !== "") {
+      text += "\n"
+      spans.push(offset - 1)
+    }
+    text += lineText
+    for (const span of lineSpans) spans.push(span + offset)
+    offset += line.length + 1
+  }
+  return { text, spans: Uint32Array.from(spans) }
 }
 
 /** The dominant line ending in text, or fallback when there is none. */
@@ -111,17 +134,53 @@ const lineEnding = (text: string, fallback: string) => {
 
 /**
  * Joins the replacement's lines with line endings taken from the matched source region. A replacement line that
- * keeps a region line (longest common subsequence, compared like the trailing-whitespace tier) reuses that line's
- * ending; a line that changes in place reuses the ending of the line it replaces; only lines beyond those take
- * `fallback`. Unchanged context inside a match therefore keeps its bytes even in a mixed-ending file.
+ * keeps a region line (longest common subsequence, keyed canonically like the matcher) reuses that line's ending;
+ * a line that changes in place reuses the ending of the line it replaces; only lines beyond those take `fallback`.
+ * Unchanged context inside a match therefore keeps its bytes even in a mixed-ending file.
  */
 const withRegionEndings = (region: string, replacement: string, fallback: string) => {
   const before = region.split(/\r?\n/)
   const endings = [...region.matchAll(/\r?\n/g)].map((match) => match[0])
   const after = replacement.split("\n")
-  const key = (line: string) => normalizeForMatch(line.trimEnd())
-  const source = alignLines(before.map(key), after.map(key))
+  const source = alignLines(before.map(canonLine), after.map(canonLine))
   return after.map((line, index) => (index === after.length - 1 ? line : line + (endings[source[index]!] ?? fallback))).join("")
+}
+
+/**
+ * The canonical tier's splice: the file's whitespace stands at every content boundary, so a mapped line takes the
+ * region line's leading and trailing whitespace around the model's content; only where the region starts or ends
+ * inside a line's content do the model's own boundary whitespace splice in. Endings are assigned as in
+ * withRegionEndings.
+ */
+const withCanonicalRegion = (
+  region: string,
+  replacement: string,
+  fallback: string,
+  view: string,
+  start: number,
+  end: number,
+) => {
+  const before = region.split(/\r?\n/)
+  const endings = [...region.matchAll(/\r?\n/g)].map((match) => match[0])
+  const after = replacement.split("\n")
+  const source = alignLines(before.map(canonLine), after.map(canonLine))
+  const leftMid = start > 0 && /\S/.test(view[start - 1])
+  const rightMid = end < view.length && /\S/.test(view[end])
+  const splice = (line: string, index: number) => {
+    const mapped = source[index]
+    if (mapped === undefined) return line
+    const lead = (mapped === 0 && leftMid ? line : before[mapped]).match(/^[ \t]*/)![0]
+    const trail = (mapped === before.length - 1 && rightMid ? line : before[mapped]).match(/[ \t]*$/)![0]
+    const mLead = line.match(/^[ \t]*/)![0]
+    const mTrail = line.match(/[ \t]*$/)![0]
+    return lead + line.slice(mLead.length, line.length - mTrail.length) + trail
+  }
+  return after
+    .map((line, index) => {
+      const content = splice(line, index)
+      return index === after.length - 1 ? content : content + (endings[source[index]!] ?? fallback)
+    })
+    .join("")
 }
 
 /**
@@ -165,24 +224,48 @@ const alignLines = (before: string[], after: string[]) => {
  * Matches against the LF view Read shows the model, then maps offsets back to the source, so CRLF and mixed line
  * endings neither block matches nor leak into untouched regions.
  */
-const matchView = (source: string, oldString: string, newString: string) => {
+const matchView = (source: string, oldString: string, newString: string, replaceAll: boolean) => {
   const view = source.replaceAll(crlf, "\n")
   const removed = [...source.matchAll(/\r\n/g)].map((match, index) => match.index - index)
   const fileEnding = lineEnding(source, "\n")
   const search = oldString.replaceAll(crlf, "\n")
   const replacement = newString.replaceAll(crlf, "\n")
   const exact = findOccurrences(view, search)
-  // These one-to-one mappings preserve offsets into the LF view.
-  const unicode = exact.length > 0 ? [] : findOccurrences(normalizeForMatch(view), normalizeForMatch(search))
-  const trailing = exact.length > 0 || unicode.length > 0 ? [] : findLineOccurrences(view, search)
+  // The canonical tier is a superset of the exact tier (whitespace-variant twins included). An empty
+  // canonical form (whitespace-only oldString) never matches — findOccurrences would spin on an empty needle.
+  let canonical: Match[] = []
+  if (exact.length === 0 || replaceAll) {
+    const fileCanon = canon(view)
+    const needle = canon(search).text
+    if (needle !== "")
+      canonical = findOccurrences(fileCanon.text, needle).map((match) => ({
+        start: fileCanon.spans[match.start],
+        end: fileCanon.spans[match.end - 1] + 1,
+      }))
+  }
+  // execute selects the canonical set when replaceAll is requested or no exact match exists — the same rule here
+  // picks the tier each selected match is spliced with.
+  const canonicalTier = replaceAll || exact.length === 0
   return {
-    matches: (exact.length > 0 ? exact : unicode.length > 0 ? unicode : trailing).map((match) => ({
+    exact: exact.map((match) => ({
+      start: match.start + countBefore(removed, match.start),
+      end: match.end + countBefore(removed, match.end),
+    })),
+    canonical: canonical.map((match) => ({
       start: match.start + countBefore(removed, match.start),
       end: match.end + countBefore(removed, match.end),
     })),
     replace: (match: Match) => {
       const region = source.slice(match.start, match.end)
-      return withRegionEndings(region, replacement, lineEnding(region, fileEnding))
+      if (!canonicalTier) return withRegionEndings(region, replacement, lineEnding(region, fileEnding))
+      return withCanonicalRegion(
+        region,
+        replacement,
+        lineEnding(region, fileEnding),
+        view,
+        match.start - countBefore(removed, match.start),
+        match.end - countBefore(removed, match.end),
+      )
     },
   }
 }
@@ -200,8 +283,8 @@ const missHint = (source: string, oldString: string, newString: string) => {
   const view = source.replaceAll(crlf, "\n")
   const replacement = newString.replaceAll(crlf, "\n")
   if (replacement.trim().length >= 20 && normalizeForMatch(view).includes(normalizeForMatch(replacement)))
-    return "newString is already in the file, so this edit may already be applied."
-  const key = (line: string) => normalizeForMatch(line).replace(/\s+/g, " ").trim()
+    return alreadyApplied
+  const key = canonLine
   const distinct = (line: string) => /[\p{L}\p{N}]/u.test(line)
   const lines = view.split("\n")
   const search = oldString.replaceAll(crlf, "\n").split("\n")
@@ -230,12 +313,12 @@ const missHint = (source: string, oldString: string, newString: string) => {
   const from = matched[0]
   const to = Math.min(matched.at(-1)! + 1, from + hintLines)
   return [
-    "The closest lines in the file:",
+    closestLines,
     ...lines
       .slice(from, to)
       .map(
         (line, index) =>
-          `${from + index + 1}: ${line.length > hintLineLength ? `${line.slice(0, hintLineLength)}…` : line}`,
+          `${LinePrefix.render(from + index + 1)}${line.length > hintLineLength ? `${line.slice(0, hintLineLength)}…` : line}`,
       ),
   ].join("\n")
 }
@@ -271,20 +354,19 @@ export const Plugin = {
         editor.add({
           name,
           options: { codemode: false, permission: "edit" },
-          description:
-            "Edit the contents of a file by finding and replacing exact text. When editing text from Read output, preserve the exact indentation (tabs or spaces) and omit the line-number prefix, such as `1: `. Never include the prefix in oldString or newString. Write line breaks as \\n; the file's existing CRLF or LF line endings are matched and preserved. To change line endings themselves, make oldString and newString differ only in \\r; that edit applies to the exact bytes. If there is no exact match, the edit retries while ignoring typographic quote, dash, and space variants, then trailing whitespace on each line. The edit fails if oldString is not found. By default, oldString must identify a UNIQUE location. Multiple matches FAIL unless replaceAll is true. Add more surrounding context to disambiguate, or set replaceAll to true to replace every occurrence. Use replaceAll when the change should apply to every occurrence, such as renaming a variable.",
+          description,
           input: Input,
           output: Output,
           execute: (input, context) => {
             return Effect.gen(function* () {
               if (input.oldString === input.newString) {
                 return yield* new ToolFailure({
-                  message: "No changes to apply: oldString and newString are identical.",
+                  message: identicalNoOp,
                 })
               }
               if (input.oldString === "") {
                 return yield* new ToolFailure({
-                  message: "oldString must not be empty. Use write to create or overwrite a file.",
+                  message: emptyOldString,
                 })
               }
 
@@ -292,23 +374,28 @@ export const Plugin = {
 
               const original = yield* FileMutation.readText(environment.files, target.absolute).pipe(
                 Effect.catchTag("Environment.NotFound", () =>
-                  Effect.fail(new ToolFailure({ message: `File not found: ${input.path}` })),
+                  Effect.fail(new ToolFailure({ message: notFound("File", input.path) })),
                 ),
                 Effect.catchTag("Environment.WrongKind", (error) =>
                   error.actual === "directory"
-                    ? Effect.fail(new ToolFailure({ message: `Path is a directory, not a file: ${input.path}` }))
-                    : Effect.fail(new ToolFailure({ message: `Unable to edit ${input.path}`, error })),
+                    ? Effect.fail(new ToolFailure({ message: directoryNotFile(input.path) }))
+                    : Effect.fail(new ToolFailure({ message: unableTo("edit", input.path), error })),
                 ),
               )
               const source = original.text
-              // Strings that differ only in \r ask to change line endings themselves, so they apply to the exact
-              // bytes. Every other edit matches the LF view Read shows the model and keeps the file's endings.
+              // Legacy path, preserved for model input that still carries the byte: pairs differing only in
+              // `\r` were once the advertised way to change line endings. The model-facing voice no longer
+              // names it (content + `\n` only) — this conditional is not discoverable from the voice and
+              // exists so such input (a slip, a model trained on a prior description) keeps working. It
+              // applies `newString` to the exact bytes, bypassing both tiers.
               const endingsOnly = input.oldString.replaceAll("\r", "") === input.newString.replaceAll("\r", "")
-              const { matches, replace } = endingsOnly
-                ? { matches: findOccurrences(source, input.oldString), replace: () => input.newString }
-                : matchView(source, input.oldString, input.newString)
-              const replacements = matches.length
-              const replaced = (input.replaceAll === true ? matches : matches.slice(0, 1))
+              const raw = endingsOnly ? findOccurrences(source, input.oldString) : []
+              const { exact, canonical, replace } = endingsOnly
+                ? { exact: raw, canonical: raw, replace: () => input.newString }
+                : matchView(source, input.oldString, input.newString, input.replaceAll === true)
+              const selected = input.replaceAll === true ? canonical : exact.length > 0 ? exact : canonical
+              const replacements = selected.length
+              const replaced = (input.replaceAll === true ? selected : selected.slice(0, 1))
                 .toReversed()
                 .reduce(
                   (content, match) => `${content.slice(0, match.start)}${replace(match)}${content.slice(match.end)}`,
@@ -329,19 +416,17 @@ export const Plugin = {
                 })
                 const hint = readable ? missHint(source, input.oldString, input.newString) : undefined
                 return yield* new ToolFailure({
-                  message: `Could not find oldString in ${input.path}. It must match exactly, including whitespace and indentation.${hint ? `\n\n${hint}` : ""}`,
+                  message: noMatch(input.path, hint),
                 })
               }
               if (replacements > 1 && input.replaceAll !== true) {
                 return yield* new ToolFailure({
-                  message: `Found ${replacements} matches for oldString, but expected exactly one. Add more surrounding context to make oldString unique, or set replaceAll to true to replace every occurrence.`,
+                  message: ambiguity(replacements),
                 })
               }
               if (replaced === source) {
                 return yield* new ToolFailure({
-                  message: endingsOnly
-                    ? `No changes to apply: ${input.path} already has those line endings.`
-                    : `No changes to apply: the edit leaves ${input.path} unchanged. Line endings follow the file; to change them, write \\r explicitly in oldString or newString.`,
+                  message: noOp(input.path, endingsOnly),
                 })
               }
               const result = yield* fileWrite.commit(target, replaced)
@@ -355,10 +440,10 @@ export const Plugin = {
               fileMutation.withLock([FileAccess.resolvePath(location.directory, input.path)]),
               Effect.map((output) => ({
                 output,
-                content: `Edited ${output.files[0]?.file} (${output.replacements} replacement${output.replacements === 1 ? "" : "s"})`,
+                content: edited(output.files[0]?.file, output.replacements),
                 metadata: { files: output.files },
               })),
-              Effect.mapError(toolFailure(`Unable to edit ${input.path}`)),
+              Effect.mapError(toolFailure(unableTo("edit", input.path))),
             )
           },
         }),
