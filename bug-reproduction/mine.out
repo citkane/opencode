@@ -1,0 +1,109 @@
+=== candidate census (mechanical net, no curation) ===
+model text parts scanned: 21963 (parts+msg, reasoning+text, all sessions)
+CANDIDATE parts (>=1 clue matched): 10112
+  by store: {'parts': 2684, 'msg': 7428}
+  distinct candidate sids: 193
+
+  by clue (parts that matched | total occurrences):
+    clue               grp/tier    parts        occ
+    A.new_str_sp       A/core         57        125
+    A.newstring        A/core       1448       7915
+    A.old_str_sp       A/core         82        191
+    A.oldstring        A/core       2780      21937
+    B.crlf             B/core       1810      15715
+    B.escl_n           B/core       1876      44615
+    B.escl_r           B/core       1483      21970
+    B.line_break       B/broad       268        707
+    B.line_ending      B/core       1330       8004
+    B.linefeed         B/core         28         67
+    B.newline          B/core        699       2488
+    B.terminator       B/wild        650       3387
+    C.blank_line       C/broad      1123       4945
+    C.double_space     C/core        115        279
+    C.empty_line       C/broad       355        891
+    C.extra_space      C/core         57        100
+    C.indent           C/core       2079      12957
+    C.leading_space    C/core        416       1346
+    C.tab              C/broad      1354       7235
+    C.trailing_space   C/core        491       1686
+    C.whitespace       C/core       2074      16480
+    C.whitespace_only  C/core        489       1737
+    D.bom              D/wild        460       1815
+    D.code_point       D/core         37         95
+    D.cp_notation      D/wild         94        291
+    D.eof              D/wild        170        547
+    D.hexbyte          D/wild        146        504
+    D.hidden_char      D/core         13         29
+    D.invisible        D/core        463       1253
+    D.nbsp             D/core         57        130
+    D.no_break         D/core         24         42
+    D.raw_cr           D/core          0          0
+    D.typograph        D/core        598       1810
+    D.unicode          D/core        433       1488
+    D.zero_width       D/core         13         23
+    E.already_applied  E/core        270        615
+    E.already_in_file  E/core        149        320
+    E.byte_check       E/core        181        424
+    E.byte_for_byte    E/core        385        723
+    E.cat_a            E/core        314        961
+    E.closest_lines    E/core        441       1219
+    E.does_not_match   E/core         79        277
+    E.exact_bytes      E/core        840       2112
+    E.exactly_n        E/wild       1017       2180
+    E.exactly_one      E/core        660       1396
+    E.expected_one     E/core        149        384
+    E.found_n          E/core        289        699
+    E.hexdump          E/core         57        101
+    E.multiple_matches E/core        139        252
+    E.must_match       E/core        242        615
+    E.no_match         E/broad       482       1066
+    E.no_op            E/core        234        753
+    E.od_xxd           E/core        100        194
+    E.off_by           E/core        573       5322
+    E.raw_bytes        E/core        188        306
+    F.colon            F/wild        180        409
+    F.decode           F/wild       2049      17014
+    F.delimiter        F/wild        616       2679
+    F.prefix           F/wild       2751      17740
+    F.separator        F/wild        755       2894
+    F.strip            F/wild        314        591
+    G.line_number      G/wild       1016       3072
+    G.renumber         G/wild        252        726
+    G.truncat          G/wild       1175       5349
+    H.byte             H/wild       4027      32626
+    H.char             H/wild       1571       7476
+    I.guess            I/wild        533       1395
+    I.mismatch         I/wild        765       1728
+    I.misread          I/wild        288        512
+    I.preview          I/wild       1221       6997
+    I.render           I/wild       2710      20232
+    I.stray            I/wild        367       1088
+    I.verbatim         I/wild       1861       7258
+    J.hmm              J/broad      3807      26650
+    J.no_wait          J/broad      1160       2070
+    K.differ_only_cr   K/core        320        947
+    K.endings_follow   K/core        158        523
+    K.it_must          K/core        165        354
+    K.line_number_prefix K/core        257        649
+    K.make_unique      K/core        153        598
+    K.one_based        K/core        147        364
+    K.prefix_reference K/core        128        476
+    K.retry_variants   K/core        193        332
+    K.unique_location  K/core        107        204
+    K.write_cr_explicit K/core         62        164
+    X.bare_match       X/wild       4863      37518
+    X.nnn_colon        X/wild       3592      24829
+
+  by group (parts with >=1 clue in group | occurrences):
+    group A:  2874 parts,  30168 occurrences
+    group B:  3209 parts,  96953 occurrences
+    group C:  3598 parts,  47656 occurrences
+    group D:  1590 parts,   8027 occurrences
+    group E:  2998 parts,  19919 occurrences
+    group F:  3789 parts,  41327 occurrences
+    group G:  2015 parts,   9147 occurrences
+    group H:  4510 parts,  40102 occurrences
+    group I:  4382 parts,  39210 occurrences
+    group J:  3939 parts,  28720 occurrences
+    group K:   821 parts,   4611 occurrences
+    group X:  6191 parts,  62347 occurrences

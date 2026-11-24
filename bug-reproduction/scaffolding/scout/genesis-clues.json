@@ -1,0 +1,721 @@
+{
+  "note": "The seed clue set (87), captured verbatim from the hand-designed CLUES (source patterns, not compiled). Confirmed by the director as the genesis seed. The live clue set in data.sqlite is seeded from here on init; this file is the reference, not a working copy.",
+  "clues": [
+    {
+      "name": "A.oldstring",
+      "group": "A",
+      "tier": "core",
+      "patterns": [
+        "oldstring"
+      ]
+    },
+    {
+      "name": "A.newstring",
+      "group": "A",
+      "tier": "core",
+      "patterns": [
+        "newstring"
+      ]
+    },
+    {
+      "name": "A.old_str_sp",
+      "group": "A",
+      "tier": "core",
+      "patterns": [
+        "old\\ string",
+        "old_string"
+      ]
+    },
+    {
+      "name": "A.new_str_sp",
+      "group": "A",
+      "tier": "core",
+      "patterns": [
+        "new\\ string",
+        "new_string"
+      ]
+    },
+    {
+      "name": "B.crlf",
+      "group": "B",
+      "tier": "core",
+      "patterns": [
+        "crlf",
+        "carriage\\ return",
+        "carriage\\-return"
+      ]
+    },
+    {
+      "name": "B.line_ending",
+      "group": "B",
+      "tier": "core",
+      "patterns": [
+        "line\\ ending",
+        "line\\-ending"
+      ]
+    },
+    {
+      "name": "B.line_break",
+      "group": "B",
+      "tier": "broad",
+      "patterns": [
+        "line\\ break"
+      ]
+    },
+    {
+      "name": "B.linefeed",
+      "group": "B",
+      "tier": "core",
+      "patterns": [
+        "linefeed"
+      ]
+    },
+    {
+      "name": "B.newline",
+      "group": "B",
+      "tier": "core",
+      "patterns": [
+        "newline"
+      ]
+    },
+    {
+      "name": "B.escl_r",
+      "group": "B",
+      "tier": "core",
+      "patterns": [
+        "\\\\r"
+      ]
+    },
+    {
+      "name": "B.escl_n",
+      "group": "B",
+      "tier": "core",
+      "patterns": [
+        "\\\\n"
+      ]
+    },
+    {
+      "name": "B.terminator",
+      "group": "B",
+      "tier": "wild",
+      "patterns": [
+        "terminator"
+      ]
+    },
+    {
+      "name": "C.whitespace",
+      "group": "C",
+      "tier": "core",
+      "patterns": [
+        "whitespace",
+        "white\\ space"
+      ]
+    },
+    {
+      "name": "C.indent",
+      "group": "C",
+      "tier": "core",
+      "patterns": [
+        "indent"
+      ]
+    },
+    {
+      "name": "C.tab",
+      "group": "C",
+      "tier": "broad",
+      "patterns": [
+        "\\btabs?\\b"
+      ]
+    },
+    {
+      "name": "C.leading_space",
+      "group": "C",
+      "tier": "core",
+      "patterns": [
+        "leading\\ space"
+      ]
+    },
+    {
+      "name": "C.trailing_space",
+      "group": "C",
+      "tier": "core",
+      "patterns": [
+        "trailing\\ space"
+      ]
+    },
+    {
+      "name": "C.extra_space",
+      "group": "C",
+      "tier": "core",
+      "patterns": [
+        "extra\\ space"
+      ]
+    },
+    {
+      "name": "C.blank_line",
+      "group": "C",
+      "tier": "broad",
+      "patterns": [
+        "blank\\ line"
+      ]
+    },
+    {
+      "name": "C.empty_line",
+      "group": "C",
+      "tier": "broad",
+      "patterns": [
+        "empty\\ line"
+      ]
+    },
+    {
+      "name": "C.double_space",
+      "group": "C",
+      "tier": "core",
+      "patterns": [
+        "double\\ space"
+      ]
+    },
+    {
+      "name": "C.whitespace_only",
+      "group": "C",
+      "tier": "core",
+      "patterns": [
+        "whitespace\\ only",
+        "whitespace\\-only"
+      ]
+    },
+    {
+      "name": "D.invisible",
+      "group": "D",
+      "tier": "core",
+      "patterns": [
+        "invisible"
+      ]
+    },
+    {
+      "name": "D.hidden_char",
+      "group": "D",
+      "tier": "core",
+      "patterns": [
+        "hidden\\ char"
+      ]
+    },
+    {
+      "name": "D.no_break",
+      "group": "D",
+      "tier": "core",
+      "patterns": [
+        "no\\-break"
+      ]
+    },
+    {
+      "name": "D.nbsp",
+      "group": "D",
+      "tier": "core",
+      "patterns": [
+        "nbsp"
+      ]
+    },
+    {
+      "name": "D.zero_width",
+      "group": "D",
+      "tier": "core",
+      "patterns": [
+        "zero\\-width"
+      ]
+    },
+    {
+      "name": "D.code_point",
+      "group": "D",
+      "tier": "core",
+      "patterns": [
+        "code\\ point",
+        "codepoint"
+      ]
+    },
+    {
+      "name": "D.unicode",
+      "group": "D",
+      "tier": "core",
+      "patterns": [
+        "unicode"
+      ]
+    },
+    {
+      "name": "D.typograph",
+      "group": "D",
+      "tier": "core",
+      "patterns": [
+        "typograph"
+      ]
+    },
+    {
+      "name": "D.raw_cr",
+      "group": "D",
+      "tier": "core",
+      "patterns": [
+        "\\r"
+      ]
+    },
+    {
+      "name": "D.bom",
+      "group": "D",
+      "tier": "wild",
+      "patterns": [
+        "\\bbom\\b"
+      ]
+    },
+    {
+      "name": "D.eof",
+      "group": "D",
+      "tier": "wild",
+      "patterns": [
+        "\\beof\\b"
+      ]
+    },
+    {
+      "name": "D.cp_notation",
+      "group": "D",
+      "tier": "wild",
+      "patterns": [
+        "u\\+00[0-9a-f]{2}",
+        "\\\\u00[0-9a-f]{2}"
+      ]
+    },
+    {
+      "name": "D.hexbyte",
+      "group": "D",
+      "tier": "wild",
+      "patterns": [
+        "\\b0x[0-9a-f]{2,4}\\b"
+      ]
+    },
+    {
+      "name": "E.closest_lines",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "closest\\ lines"
+      ]
+    },
+    {
+      "name": "E.must_match",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "must\\ match\\ exactly"
+      ]
+    },
+    {
+      "name": "E.expected_one",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "expected\\ exactly\\ one"
+      ]
+    },
+    {
+      "name": "E.exact_bytes",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "exact\\ bytes"
+      ]
+    },
+    {
+      "name": "E.byte_for_byte",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "byte\\-for\\-byte"
+      ]
+    },
+    {
+      "name": "E.raw_bytes",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "raw\\ bytes"
+      ]
+    },
+    {
+      "name": "E.byte_check",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "byte\\-check",
+        "byte\\ check"
+      ]
+    },
+    {
+      "name": "E.cat_a",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "cat\\ \\-A"
+      ]
+    },
+    {
+      "name": "E.already_in_file",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "already\\ in\\ the\\ file"
+      ]
+    },
+    {
+      "name": "E.multiple_matches",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "multiple\\ matches"
+      ]
+    },
+    {
+      "name": "E.no_match",
+      "group": "E",
+      "tier": "broad",
+      "patterns": [
+        "no\\ match"
+      ]
+    },
+    {
+      "name": "E.does_not_match",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "does\\ not\\ match"
+      ]
+    },
+    {
+      "name": "E.hexdump",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "hexdump"
+      ]
+    },
+    {
+      "name": "E.no_op",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "no\\ changes\\ to\\ apply"
+      ]
+    },
+    {
+      "name": "E.found_n",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "found\\s+\\d+\\s+matches"
+      ]
+    },
+    {
+      "name": "E.already_applied",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "already\\ applied"
+      ]
+    },
+    {
+      "name": "E.od_xxd",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "\\bod -c\\b",
+        "\\bxxd\\b"
+      ]
+    },
+    {
+      "name": "E.exactly_one",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "exactly\\ one"
+      ]
+    },
+    {
+      "name": "E.exactly_n",
+      "group": "E",
+      "tier": "wild",
+      "patterns": [
+        "exactly\\s+(one|two|three|four|five|six|seven|eight|nine|ten|\\d+)\\b"
+      ]
+    },
+    {
+      "name": "E.off_by",
+      "group": "E",
+      "tier": "core",
+      "patterns": [
+        "off\\ by",
+        "by\\ one",
+        "by\\ 1",
+        "off\\-by\\-one",
+        "off\\-by\\-1"
+      ]
+    },
+    {
+      "name": "F.prefix",
+      "group": "F",
+      "tier": "wild",
+      "patterns": [
+        "prefix"
+      ]
+    },
+    {
+      "name": "F.decode",
+      "group": "F",
+      "tier": "wild",
+      "patterns": [
+        "decode"
+      ]
+    },
+    {
+      "name": "F.separator",
+      "group": "F",
+      "tier": "wild",
+      "patterns": [
+        "separator"
+      ]
+    },
+    {
+      "name": "F.delimiter",
+      "group": "F",
+      "tier": "wild",
+      "patterns": [
+        "delimiter"
+      ]
+    },
+    {
+      "name": "F.colon",
+      "group": "F",
+      "tier": "wild",
+      "patterns": [
+        "after\\ the\\ colon",
+        "past\\ the\\ colon",
+        "post\\-colon"
+      ]
+    },
+    {
+      "name": "F.strip",
+      "group": "F",
+      "tier": "wild",
+      "patterns": [
+        "strip\\ the",
+        "stripping\\ the"
+      ]
+    },
+    {
+      "name": "G.truncat",
+      "group": "G",
+      "tier": "wild",
+      "patterns": [
+        "truncat"
+      ]
+    },
+    {
+      "name": "G.line_number",
+      "group": "G",
+      "tier": "wild",
+      "patterns": [
+        "line\\ number"
+      ]
+    },
+    {
+      "name": "G.renumber",
+      "group": "G",
+      "tier": "wild",
+      "patterns": [
+        "renumber"
+      ]
+    },
+    {
+      "name": "H.byte",
+      "group": "H",
+      "tier": "wild",
+      "patterns": [
+        "byte"
+      ]
+    },
+    {
+      "name": "H.char",
+      "group": "H",
+      "tier": "wild",
+      "patterns": [
+        "char"
+      ]
+    },
+    {
+      "name": "I.stray",
+      "group": "I",
+      "tier": "wild",
+      "patterns": [
+        "stray"
+      ]
+    },
+    {
+      "name": "I.mismatch",
+      "group": "I",
+      "tier": "wild",
+      "patterns": [
+        "mismatch"
+      ]
+    },
+    {
+      "name": "I.misread",
+      "group": "I",
+      "tier": "wild",
+      "patterns": [
+        "misread"
+      ]
+    },
+    {
+      "name": "I.guess",
+      "group": "I",
+      "tier": "wild",
+      "patterns": [
+        "guess"
+      ]
+    },
+    {
+      "name": "I.verbatim",
+      "group": "I",
+      "tier": "wild",
+      "patterns": [
+        "verbatim"
+      ]
+    },
+    {
+      "name": "I.render",
+      "group": "I",
+      "tier": "wild",
+      "patterns": [
+        "render"
+      ]
+    },
+    {
+      "name": "I.preview",
+      "group": "I",
+      "tier": "wild",
+      "patterns": [
+        "preview"
+      ]
+    },
+    {
+      "name": "J.hmm",
+      "group": "J",
+      "tier": "broad",
+      "patterns": [
+        "\\bhmm+\\b"
+      ]
+    },
+    {
+      "name": "J.no_wait",
+      "group": "J",
+      "tier": "broad",
+      "patterns": [
+        "no\\ wait"
+      ]
+    },
+    {
+      "name": "K.it_must",
+      "group": "K",
+      "tier": "core",
+      "patterns": [
+        "it\\ must\\ match\\ exactly"
+      ]
+    },
+    {
+      "name": "K.line_number_prefix",
+      "group": "K",
+      "tier": "core",
+      "patterns": [
+        "line\\-number\\ prefix"
+      ]
+    },
+    {
+      "name": "K.prefix_reference",
+      "group": "K",
+      "tier": "core",
+      "patterns": [
+        "prefix\\ is\\ for\\ reference",
+        "not\\ part\\ of\\ the\\ file\\ content"
+      ]
+    },
+    {
+      "name": "K.differ_only_cr",
+      "group": "K",
+      "tier": "core",
+      "patterns": [
+        "differ\\ only\\ in"
+      ]
+    },
+    {
+      "name": "K.retry_variants",
+      "group": "K",
+      "tier": "core",
+      "patterns": [
+        "typographic\\ quote"
+      ]
+    },
+    {
+      "name": "K.unique_location",
+      "group": "K",
+      "tier": "core",
+      "patterns": [
+        "identify\\ a\\ unique"
+      ]
+    },
+    {
+      "name": "K.make_unique",
+      "group": "K",
+      "tier": "core",
+      "patterns": [
+        "make\\ oldstring\\ unique",
+        "add\\ more\\ surrounding\\ context"
+      ]
+    },
+    {
+      "name": "K.endings_follow",
+      "group": "K",
+      "tier": "core",
+      "patterns": [
+        "line\\ endings\\ follow\\ the\\ file"
+      ]
+    },
+    {
+      "name": "K.write_cr_explicit",
+      "group": "K",
+      "tier": "core",
+      "patterns": [
+        "write \\\\r explicitly"
+      ]
+    },
+    {
+      "name": "K.one_based",
+      "group": "K",
+      "tier": "core",
+      "patterns": [
+        "1\\-based\\ line\\ number"
+      ]
+    },
+    {
+      "name": "X.nnn_colon",
+      "group": "X",
+      "tier": "wild",
+      "patterns": [
+        "\\b\\d{1,4}:\\s"
+      ]
+    },
+    {
+      "name": "X.bare_match",
+      "group": "X",
+      "tier": "wild",
+      "patterns": [
+        "\\bmatch(es|ed|ing)?\\b"
+      ]
+    }
+  ]
+}
